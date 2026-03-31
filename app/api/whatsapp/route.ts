@@ -1,22 +1,17 @@
-import express from 'express';
-import { createServer as createViteServer } from 'vite';
+import { NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type, FunctionDeclaration, Content } from '@google/genai';
-import path from 'path';
 
-const app = express();
-app.use(express.json());
-const PORT = 3000;
-
-// Supabase setup
+// Initialize Supabase
 const supabaseUrl = process.env.SUPABASE_URL || '';
 const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
 const supabase = createClient(supabaseUrl, supabaseKey);
 
-// Gemini setup
+// Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
-// In-memory chat history (for demo purposes)
+// In a real production app, you'd store chat history in a database (like Supabase or Redis).
+// For demonstration, we'll use a simple in-memory store (Note: this resets on serverless cold starts).
 const chatHistories: Record<string, Content[]> = {};
 
 const saveLeadDeclaration: FunctionDeclaration = {
@@ -42,12 +37,13 @@ Do not tell the user you are "saving data." Just keep the conversation natural a
 
 The Moment of Truth: The very instant you have gathered all the required parameters (Name, Phone, Intent, Location, Budget, Timeline), STOP and execute the save_lead_to_supabase tool.`;
 
-app.post('/api/whatsapp', async (req, res) => {
+export async function POST(req: Request) {
   try {
-    const { message, from } = req.body;
+    const body = await req.json();
+    const { message, from } = body;
 
     if (!message || !from) {
-      return res.status(400).json({ error: 'Missing message or from field' });
+      return NextResponse.json({ error: 'Missing message or from field' }, { status: 400 });
     }
 
     if (!chatHistories[from]) {
@@ -70,35 +66,33 @@ app.post('/api/whatsapp', async (req, res) => {
 
     if (response.functionCalls && response.functionCalls.length > 0) {
       const call = response.functionCalls[0];
+      
       if (call.name === 'save_lead_to_supabase') {
         const args = call.args as any;
         
         // Save to Supabase
-        if (supabaseUrl && supabaseKey) {
-          const { error } = await supabase
-            .from('real_estate_leads')
-            .insert([
-              {
-                name: args.name,
-                phone: args.phone,
-                intent: args.intent,
-                location: args.location,
-                budget: args.budget,
-                timeline: args.timeline,
-              },
-            ]);
-            
-          if (error) {
-            console.error('Supabase error:', error);
-            botReply = "I'm sorry, there was an error processing your request. Please try again later.";
-          } else {
-            botReply = "Thank you, Sir/Ma. I've sent your details to our head agent. They will reach out to you on WhatsApp within the next 30 minutes to finalize the viewing. Anything else I can help with?";
-          }
+        const { error } = await supabase
+          .from('real_estate_leads')
+          .insert([
+            {
+              name: args.name,
+              phone: args.phone,
+              intent: args.intent,
+              location: args.location,
+              budget: args.budget,
+              timeline: args.timeline,
+            },
+          ]);
+          
+        if (error) {
+          console.error('Supabase error:', error);
+          botReply = "I'm sorry, there was an error processing your request. Please try again later.";
         } else {
-          console.warn('Supabase credentials not configured. Skipping DB insert.');
+          // The exact response requested by the CEO logic
           botReply = "Thank you, Sir/Ma. I've sent your details to our head agent. They will reach out to you on WhatsApp within the next 30 minutes to finalize the viewing. Anything else I can help with?";
         }
         
+        // Update history with the tool call and response
         history.push({ role: 'model', parts: [{ functionCall: call }] });
         history.push({ role: 'user', parts: [{ functionResponse: { name: 'save_lead_to_supabase', response: { status: 'success' } } }] });
         history.push({ role: 'model', parts: [{ text: botReply }] });
@@ -108,32 +102,9 @@ app.post('/api/whatsapp', async (req, res) => {
       history.push({ role: 'model', parts: [{ text: botReply }] });
     }
 
-    res.json({ reply: botReply });
+    return NextResponse.json({ reply: botReply });
   } catch (error) {
     console.error('Error processing message:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
-});
-
-// Vite middleware setup
-async function startServer() {
-  if (process.env.NODE_ENV !== 'production') {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: 'spa',
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), 'dist');
-    app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.join(distPath, 'index.html'));
-    });
-  }
-
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(\`Server running on http://localhost:\${PORT}\`);
-  });
 }
-
-startServer();
