@@ -3,9 +3,17 @@ import { createClient } from '@supabase/supabase-js';
 import { GoogleGenAI, Type, FunctionDeclaration, Content } from '@google/genai';
 
 // Initialize Supabase
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+let supabase: any = null;
+function getSupabase() {
+  if (!supabase) {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (supabaseUrl && supabaseKey) {
+      supabase = createClient(supabaseUrl, supabaseKey);
+    }
+  }
+  return supabase;
+}
 
 // Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -71,24 +79,30 @@ export async function POST(req: Request) {
         const args = call.args as any;
         
         // Save to Supabase
-        const { error } = await supabase
-          .from('real_estate_leads')
-          .insert([
-            {
-              name: args.name,
-              phone: args.phone,
-              intent: args.intent,
-              location: args.location,
-              budget: args.budget,
-              timeline: args.timeline,
-            },
-          ]);
-          
-        if (error) {
-          console.error('Supabase error:', error);
-          botReply = "I'm sorry, there was an error processing your request. Please try again later.";
+        const supabaseClient = getSupabase();
+        if (supabaseClient) {
+          const { error } = await supabaseClient
+            .from('real_estate_leads')
+            .insert([
+              {
+                name: args.name,
+                phone: args.phone,
+                intent: args.intent,
+                location: args.location,
+                budget: args.budget,
+                timeline: args.timeline,
+              },
+            ]);
+            
+          if (error) {
+            console.error('Supabase error:', error);
+            botReply = "I'm sorry, there was an error processing your request. Please try again later.";
+          } else {
+            // The exact response requested by the CEO logic
+            botReply = "Thank you, Sir/Ma. I've sent your details to our head agent. They will reach out to you on WhatsApp within the next 30 minutes to finalize the viewing. Anything else I can help with?";
+          }
         } else {
-          // The exact response requested by the CEO logic
+          console.warn('Supabase credentials not configured. Skipping DB insert.');
           botReply = "Thank you, Sir/Ma. I've sent your details to our head agent. They will reach out to you on WhatsApp within the next 30 minutes to finalize the viewing. Anything else I can help with?";
         }
         

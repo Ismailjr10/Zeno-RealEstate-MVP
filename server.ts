@@ -9,9 +9,17 @@ app.use(express.json());
 const PORT = 3000;
 
 // Supabase setup
-const supabaseUrl = process.env.SUPABASE_URL || '';
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || '';
-const supabase = createClient(supabaseUrl, supabaseKey);
+let supabase: any = null;
+function getSupabase() {
+  if (!supabase) {
+    const supabaseUrl = process.env.SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (supabaseUrl && supabaseKey) {
+      supabase = createClient(supabaseUrl, supabaseKey);
+    }
+  }
+  return supabase;
+}
 
 // Gemini setup
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -74,8 +82,9 @@ app.post('/api/whatsapp', async (req, res) => {
         const args = call.args as any;
         
         // Save to Supabase
-        if (supabaseUrl && supabaseKey) {
-          const { error } = await supabase
+        const supabaseClient = getSupabase();
+        if (supabaseClient) {
+          const { error } = await supabaseClient
             .from('real_estate_leads')
             .insert([
               {
@@ -132,7 +141,7 @@ async function startServer() {
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(\`Server running on http://localhost:\${PORT}\`);
+    console.log(`Server running on http://localhost:${PORT}`);
   });
 }
 
