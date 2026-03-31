@@ -49,28 +49,21 @@ Do not tell the user you are "saving data." Just keep the conversation natural a
 
 The Moment of Truth: The very instant you have gathered all the required parameters (Name, Phone, Intent, Location, Budget, Timeline), STOP and execute the save_lead_to_supabase tool.`;
 
-// Whapi Outbound Integration
-async function sendWhatsAppMessage(to: string, body: string) {
+// 1. New Helper: Outbound WhatsApp Message
+async function sendWhatsAppMessage(to: string, text: string) {
   if (!process.env.WHAPI_TOKEN) {
     console.warn('WHAPI_TOKEN is missing. Skipping WhatsApp message.');
     return;
   }
   try {
-    const response = await fetch('https://gate.whapi.cloud/messages/text', {
+    await fetch('https://gate.whapi.cloud/messages/text', {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${process.env.WHAPI_TOKEN}`,
         'Content-Type': 'application/json'
       },
-      body: JSON.stringify({
-        typing_time: 0,
-        to: to,
-        body: body
-      })
+      body: JSON.stringify({ to, body: text })
     });
-    if (!response.ok) {
-      console.error('Failed to send WhatsApp message:', await response.text());
-    }
   } catch (error) {
     console.error('Error sending WhatsApp message:', error);
   }
@@ -78,11 +71,9 @@ async function sendWhatsAppMessage(to: string, body: string) {
 
 app.post('/api/whatsapp', async (req, res) => {
   try {
-    // Webhook Logic: Extract sender's ID (from) and text (body.text.body)
-    // Supports both Whapi payload and local simulator payload
-    const incomingMessage = req.body.messages?.[0] || req.body;
-    const from = incomingMessage.from;
-    const messageText = incomingMessage.text?.body || incomingMessage.message;
+    // 2. Extract sender and message from Whapi payload
+    const from = req.body.from;
+    const messageText = req.body.body?.text?.body || req.body.message;
 
     if (!messageText || !from) {
       return res.status(400).json({ error: 'Missing message or from field' });
@@ -147,10 +138,13 @@ app.post('/api/whatsapp', async (req, res) => {
       history.push({ role: 'model', parts: [{ text: botReply }] });
     }
 
-    // Send the reply back to the user's real WhatsApp
-    await sendWhatsAppMessage(from, botReply);
+    // 3. PUSH the reply to the user's phone
+    if (botReply) {
+      await sendWhatsAppMessage(from, botReply);
+    }
 
-    res.json({ reply: botReply });
+    // Return JSON so the local React simulator still works, but with a 200 OK status
+    res.status(200).json({ reply: botReply, status: 'OK' });
   } catch (error) {
     console.error('Error processing message:', error);
     res.status(500).json({ error: 'Internal server error' });
@@ -176,14 +170,13 @@ async function setupVite() {
 
 setupVite();
 
-// For local development / AI Studio preview to keep the simulator working,
-// and for Cloud Run deployments. Vercel sets the VERCEL env var, so we skip it there.
-if (!process.env.VERCEL) {
+// 4. Export for Vercel
+export default app;
+
+// Keep app.listen only for local dev (and Cloud Run preview)
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
   const PORT = process.env.PORT || 3000;
   app.listen(PORT as number, '0.0.0.0', () => {
-    console.log(`Server running on port ${PORT}`);
+    console.log(`Dev server on port ${PORT}`);
   });
 }
-
-// Export default app for Vercel Serverless Function compatibility
-export default app;
