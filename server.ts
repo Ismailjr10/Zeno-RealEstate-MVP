@@ -117,6 +117,20 @@ app.post('/api/whatsapp', async (req, res) => {
       history.push({ role: 'model', parts: [{ text: botReply }] });
     }
 
+    // After botReply is generated, send it back to the user's real WhatsApp
+    await fetch('https://gate.whapi.cloud/messages/text', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.WHAPI_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        typing_time: 0,
+        to: from, // 'from' is the sender's phone number
+        body: botReply
+      })
+    });
+
     res.json({ reply: botReply });
   } catch (error) {
     console.error('Error processing message:', error);
