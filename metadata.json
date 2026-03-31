@@ -1,0 +1,5 @@
+{
+  "name": "WhatsApp Real Estate Bot Backend",
+  "description": "A full-stack app with an Express backend to handle WhatsApp webhooks, process messages with Gemini, and save leads to Supabase.",
+  "requestFramePermissions": []
+}
