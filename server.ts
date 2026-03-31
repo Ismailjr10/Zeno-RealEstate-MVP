@@ -6,9 +6,8 @@ import path from 'path';
 
 const app = express();
 app.use(express.json());
-const PORT = 3000;
 
-// Supabase setup
+// Initialize Supabase lazily
 let supabase: any = null;
 function getSupabase() {
   if (!supabase) {
@@ -21,7 +20,7 @@ function getSupabase() {
   return supabase;
 }
 
-// Gemini setup
+// Initialize Gemini
 const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
 
 // In-memory chat history (for demo purposes)
@@ -50,11 +49,42 @@ Do not tell the user you are "saving data." Just keep the conversation natural a
 
 The Moment of Truth: The very instant you have gathered all the required parameters (Name, Phone, Intent, Location, Budget, Timeline), STOP and execute the save_lead_to_supabase tool.`;
 
+// Whapi Outbound Integration
+async function sendWhatsAppMessage(to: string, body: string) {
+  if (!process.env.WHAPI_TOKEN) {
+    console.warn('WHAPI_TOKEN is missing. Skipping WhatsApp message.');
+    return;
+  }
+  try {
+    const response = await fetch('https://gate.whapi.cloud/messages/text', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${process.env.WHAPI_TOKEN}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        typing_time: 0,
+        to: to,
+        body: body
+      })
+    });
+    if (!response.ok) {
+      console.error('Failed to send WhatsApp message:', await response.text());
+    }
+  } catch (error) {
+    console.error('Error sending WhatsApp message:', error);
+  }
+}
+
 app.post('/api/whatsapp', async (req, res) => {
   try {
-    const { message, from } = req.body;
+    // Webhook Logic: Extract sender's ID (from) and text (body.text.body)
+    // Supports both Whapi payload and local simulator payload
+    const incomingMessage = req.body.messages?.[0] || req.body;
+    const from = incomingMessage.from;
+    const messageText = incomingMessage.text?.body || incomingMessage.message;
 
-    if (!message || !from) {
+    if (!messageText || !from) {
       return res.status(400).json({ error: 'Missing message or from field' });
     }
 
@@ -63,7 +93,7 @@ app.post('/api/whatsapp', async (req, res) => {
     }
 
     const history = chatHistories[from];
-    history.push({ role: 'user', parts: [{ text: message }] });
+    history.push({ role: 'user', parts: [{ text: messageText }] });
 
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
@@ -117,19 +147,8 @@ app.post('/api/whatsapp', async (req, res) => {
       history.push({ role: 'model', parts: [{ text: botReply }] });
     }
 
-    // After botReply is generated, send it back to the user's real WhatsApp
-    await fetch('https://gate.whapi.cloud/messages/text', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${process.env.WHAPI_TOKEN}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        typing_time: 0,
-        to: from, // 'from' is the sender's phone number
-        body: botReply
-      })
-    });
+    // Send the reply back to the user's real WhatsApp
+    await sendWhatsAppMessage(from, botReply);
 
     res.json({ reply: botReply });
   } catch (error) {
@@ -138,8 +157,8 @@ app.post('/api/whatsapp', async (req, res) => {
   }
 });
 
-// Vite middleware setup
-async function startServer() {
+// Vite middleware setup for non-production
+async function setupVite() {
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -153,10 +172,18 @@ async function startServer() {
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+}
 
-  app.listen(PORT, '0.0.0.0', () => {
-    console.log(`Server running on http://localhost:${PORT}`);
+setupVite();
+
+// For local development / AI Studio preview to keep the simulator working,
+// and for Cloud Run deployments. Vercel sets the VERCEL env var, so we skip it there.
+if (!process.env.VERCEL) {
+  const PORT = process.env.PORT || 3000;
+  app.listen(PORT as number, '0.0.0.0', () => {
+    console.log(`Server running on port ${PORT}`);
   });
 }
 
-startServer();
+// Export default app for Vercel Serverless Function compatibility
+export default app;
